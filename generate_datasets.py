@@ -8,10 +8,7 @@ from itertools import product
 import random
 import os
 
-
-output_folder = 'long_first'
-
-def generate_synthetic_df(
+def generate_synthetic_long(
     num_rows=16,
     add_empty_cells=True,
     empty_frac=0.1,
@@ -61,22 +58,115 @@ def generate_synthetic_df(
 
     return df
 
-os.makedirs(output_folder, exist_ok=True)
+def generate_multiindex_sheets(
+    num_dates=2,
+    add_empty_cells=True,
+    empty_frac=0.1,
+    change_types=True,
+    wrong_type_cells=[('TV', 'Spend')]
+):
+    # Generate date range
+    base_date = pd.to_datetime('2025-07-10') + pd.Timedelta(days=np.random.randint(0, 100))
+    dates = pd.date_range(start=base_date, periods=num_dates, freq='7D')
 
-NUM_SETS = 20
+    # Channels and metrics
+    channels = ['TV', 'Radio']
+    metrics = ['Spend', 'GRPs']
 
-for i in range(NUM_SETS):
-    params = {
-        'num_rows': random.randint(12, 50),
-        'add_empty_cells': random.choice([True, False]),
-        'empty_frac': round(random.uniform(0.05, 0.3), 2),
-        'change_types': random.choice([True, False]),
-        'wrong_type_cols': random.sample(['Value', 'Date'], 
-                                         k=random.randint(0, 2))
-    }
+    # Build row-by-row dictionary
+    records = []
+    for date in dates:
+        row = {}
+        for ch in channels:
+            for m in metrics:
+                val = np.random.randint(50, 201) if m == 'Spend' else np.random.randint(1, 11)
+                row[(ch, m)] = val
+        row['Date'] = date
+        records.append(row)
 
-    df = generate_synthetic_df(**params)
-    filepath = os.path.join(output_folder, f'synthetic_dataset_{i+1}.xlsx')
-    df.to_excel(filepath, index=False)
+    # Create DataFrame
+    df = pd.DataFrame(records)
 
-    print(f"Saved: {filepath}")
+    # Set Date as index, MultiIndex for columns
+    df.set_index('Date', inplace=True)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # Introduce NaNs
+    if add_empty_cells:
+        total_cells = df.size
+        num_empty = int(total_cells * empty_frac)
+        for _ in range(num_empty):
+            row = np.random.choice(df.index)
+            col = random.choice(df.columns)
+            df.at[row, col] = np.nan
+
+    # Introduce wrong types
+    if change_types:
+        for col in wrong_type_cells:
+            if col in df.columns:
+                for row in np.random.choice(df.index, size=max(1, len(df)//8), replace=False):
+                    df.at[row, col] = random.choice(['low', 'NaN', 'unknown'])
+
+    return df
+
+
+
+# For multi table (Both these must be included)
+
+def generate_multi_table(num_dates=2):
+    base_date = pd.to_datetime('2025-07-10') + pd.Timedelta(days=np.random.randint(0, 100))
+    dates = pd.date_range(base_date, periods=num_dates, freq='7D')
+
+    rows = []
+    for date in dates:
+        for metric in ['Spend', 'GRPs']:
+            tv_value = np.random.randint(50, 201) if metric == 'Spend' else np.random.randint(1, 11)
+            radio_value = np.random.randint(50, 201) if metric == 'Spend' else np.random.randint(1, 11)
+            rows.append([date.strftime('%d/%m/%Y'), metric, tv_value, radio_value])
+
+    df = pd.DataFrame(rows, columns=['Date', 'Metric', 'TV', 'Radio'])
+    return df
+
+def generate_multitable_campaign_sheet(
+    num_campaigns=3,
+    num_dates=2,
+    add_empty_cells=True,
+    empty_frac=0.1,
+    change_types=True
+):
+    tables = []
+    for i in range(num_campaigns):
+        df = generate_multi_table(num_dates)
+
+        # Add empty cells
+        if add_empty_cells:
+            total_cells = df.size
+            num_empty = int(total_cells * empty_frac)
+            for _ in range(num_empty):
+                row = np.random.randint(0, df.shape[0])
+                col = np.random.choice(df.columns)
+                df.at[row, col] = np.nan
+
+        # Add wrong data types
+        if change_types:
+            for col in ['TV', 'Radio']:
+                for row in np.random.choice(df.index, size=max(1, len(df)//6), replace=False):
+                    df.at[row, col] = random.choice(['low', 'missing'])
+
+        # Add campaign label to columns
+        df.columns = pd.MultiIndex.from_product([[f'Campaign {chr(65 + i)}'], df.columns])
+        tables.append(df)
+
+        # Insert a visible spacer column after each campaign (except the last)
+        if i < num_campaigns - 1:
+            spacer = pd.DataFrame({'Spacer': [''] * df.shape[0]})
+            spacer.columns = pd.MultiIndex.from_tuples([(' ', ' ')])  # visually blank header
+            tables.append(spacer)
+
+    return pd.concat(tables, axis=1)
+    
+
+
+
+
+    
